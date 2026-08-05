@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Своя сквозная аналитика</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F2F1EC;--panel:#fff;--ink:#161821;--muted:#6C6E79;--line:#E6E4DC;--accent:#0E4D64;--pos:#2C7A5E;--neg:#C0463A;--shadow:0 1px 2px rgba(20,22,33,.04),0 8px 22px rgba(20,22,33,.06)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;font-size:14px;padding:20px 14px 60px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-family:"Space Grotesk";font-size:28px;margin:0}h1 .d{color:var(--accent)}
+.sub{color:var(--muted);font-size:13px;margin-top:2px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0}
+input,button{font:inherit}input[type=date]{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
+.btn{border:none;background:var(--accent);color:#fff;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer}
+h2{font-family:"Space Grotesk";font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin:24px 0 10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:9px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px}
+.kpi .l{font-size:10.5px;text-transform:uppercase;color:var(--muted);letter-spacing:.04em}
+.kpi .v{font-family:"Space Grotesk";font-size:21px;margin-top:4px;font-variant-numeric:tabular-nums}
+.v.pos{color:var(--pos)}.v.neg{color:var(--neg)}
+.tw{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:820px}th,td{padding:9px 9px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+th{font-size:10.5px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);background:#FBFAF7;cursor:pointer}
+th:first-child,td:first-child{text-align:left}td{border-bottom:1px solid #F0EEE7;font-size:13px}tbody tr:hover{background:#FAF9F5}
+.good{color:var(--pos);font-weight:600}.bad{color:var(--neg);font-weight:600}.calc{color:var(--muted)}
+tr.total td{border-top:2px solid var(--line);font-weight:700;background:#F7F6F2}
+.state{padding:40px;text-align:center;color:var(--muted)}.err{color:var(--neg)}
+.funnel{display:flex;flex-direction:column;gap:7px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.fbar{height:32px;border-radius:8px;display:flex;align-items:center;padding:0 11px;color:#fff;font-weight:600;min-width:56px}
+.conv{font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Своя сквозная аналитика<span class="d">.</span></h1>
+  <div class="sub">Facebook и amoCRM сливаются по ad_id автоматически. Обновляется само.</div>
+  <div class="bar">
+    <input type="date" id="from"/><input type="date" id="to"/>
+    <button class="btn" id="load">Показать</button>
+    <span class="sub" id="upd"></span>
+  </div>
+  <div id="app"><div class="state">Загружаю…</div></div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const money=n=>"$"+Math.round(n).toLocaleString("ru-RU");
+const money2=n=>"$"+Number(n).toLocaleString("ru-RU",{maximumFractionDigits:2});
+const rus=n=>Number(n||0).toLocaleString("ru-RU");
+const pct=n=>(n*100).toFixed(1).replace(".",",")+"%";
+const div=(a,b)=>b>0?a/b:0;
+let ROWS=[],sortKey="spend",sortDir=-1;
+
+function setDefaults(){const t=new Date();const f=new Date();f.setDate(f.getDate()-30);$("#to").value=t.toISOString().slice(0,10);$("#from").value=f.toISOString().slice(0,10);}
+async function load(){
+  $("#app").innerHTML='<div class="state">Тяну Facebook и amoCRM…</div>';
+  try{
+    const r=await fetch(`/api/data?from=${$("#from").value}&to=${$("#to").value}`);
+    const j=await r.json();
+    if(j.error) throw new Error(j.error);
+    ROWS=j.rows||[];
+    $("#upd").textContent="Обновлено "+new Date(j.updated).toLocaleString("ru-RU",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
+    render();
+  }catch(e){ $("#app").innerHTML='<div class="state err">Ошибка: '+e.message+'</div>'; }
+}
+function tot(rows){const t={spend:0,impressions:0,clicks:0,leads:0,qual:0,sales:0,revenue:0};rows.forEach(r=>{for(const k in t)t[k]+=Number(r[k]||0)});return t;}
+function byChannel(rows){const m={};rows.forEach(r=>{const k=r.channel||"—";if(!m[k])m[k]={channel:k,spend:0,impressions:0,clicks:0,leads:0,qual:0,sales:0,revenue:0};for(const f of ["spend","impressions","clicks","leads","qual","sales","revenue"])m[k][f]+=Number(r[f]||0);});return Object.values(m);}
+
+function render(){
+  if(!ROWS.length){$("#app").innerHTML='<div class="state">Нет данных за период. Проверь токены и настройки в переменных окружения.</div>';return;}
+  const t=tot(ROWS),roas=div(t.revenue,t.spend),romi=t.spend>0?(t.revenue-t.spend)/t.spend:0;
+  const kpi=(l,v,c="")=>`<div class="kpi"><div class="l">${l}</div><div class="v ${c}">${v}</div></div>`;
+  const kpis=`<div class="kpis">${kpi("Расход",money(t.spend))}${kpi("Выручка",money(t.revenue))}${kpi("Прибыль",money(t.revenue-t.spend),(t.revenue-t.spend)>=0?"pos":"neg")}${kpi("ROAS",roas.toFixed(2).replace(".",",")+"x",roas>=1?"pos":"neg")}${kpi("ROMI",(romi>=0?"+":"")+pct(romi),romi>=0?"pos":"neg")}${kpi("Лиды",rus(t.leads))}${kpi("Квал",rus(t.qual))}${kpi("Продажи",rus(t.sales))}${kpi("CPL",money2(div(t.spend,t.leads)))}${kpi("Цена квала",money2(div(t.spend,t.qual)))}${kpi("CPO",money2(div(t.spend,t.sales)))}${kpi("AOV",money2(div(t.revenue,t.sales)))}</div>`;
+
+  const ch=byChannel(ROWS).sort((a,b)=>b.spend-a.spend);
+  const chRows=ch.map(c=>{const ro=div(c.revenue,c.spend),rm=c.spend>0?(c.revenue-c.spend)/c.spend:0;return `<tr><td>${esc(c.channel)}</td><td>${money(c.spend)}</td><td class="calc">${rus(c.impressions)}</td><td class="calc">${money2(div(c.spend,c.impressions)*1000)}</td><td class="calc">${rus(c.clicks)}</td><td class="calc">${pct(div(c.clicks,c.impressions))}</td><td>${rus(c.leads)}</td><td class="calc">${money2(div(c.spend,c.leads))}</td><td>${rus(c.qual)}</td><td class="calc">${money2(div(c.spend,c.qual))}</td><td>${rus(c.sales)}</td><td>${money(c.revenue)}</td><td class="${ro>=1?"good":"bad"}">${ro.toFixed(2).replace(".",",")}x</td><td class="${rm>=0?"good":"bad"}">${(rm>=0?"+":"")+pct(rm)}</td></tr>`;}).join("");
+  const chTable=`<div class="tw"><table><thead><tr><th>Канал</th><th>Расход</th><th>Показы</th><th>CPM</th><th>Клики</th><th>CTR</th><th>Лиды</th><th>CPL</th><th>Квал</th><th>Цена квала</th><th>Прод</th><th>Выручка</th><th>ROAS</th><th>ROMI</th></tr></thead><tbody>${chRows}<tr class="total"><td>Итого</td><td>${money(t.spend)}</td><td>${rus(t.impressions)}</td><td>${money2(div(t.spend,t.impressions)*1000)}</td><td>${rus(t.clicks)}</td><td>${pct(div(t.clicks,t.impressions))}</td><td>${rus(t.leads)}</td><td>${money2(div(t.spend,t.leads))}</td><td>${rus(t.qual)}</td><td>${money2(div(t.spend,t.qual))}</td><td>${rus(t.sales)}</td><td>${money(t.revenue)}</td><td class="${roas>=1?"good":"bad"}">${roas.toFixed(2).replace(".",",")}x</td><td class="${romi>=0?"good":"bad"}">${(romi>=0?"+":"")+pct(romi)}</td></tr></tbody></table></div>`;
+
+  let creo=ROWS.map(r=>({...r,cpm:div(r.spend,r.impressions)*1000,ctr:div(r.clicks,r.impressions),cpc:div(r.spend,r.clicks),cpl:div(r.spend,r.leads),cpq:div(r.spend,r.qual),cpo:div(r.spend,r.sales),roas:div(r.revenue,r.spend),romi:r.spend>0?(r.revenue-r.spend)/r.spend:0}));
+  creo.sort((a,b)=>(a[sortKey]<b[sortKey]?1:-1)*sortDir);
+  const cols=[["creative","Креатив"],["channel","Канал"],["spend","Расход"],["impressions","Показы"],["cpm","CPM"],["clicks","Клики"],["ctr","CTR"],["leads","Лиды"],["cpl","CPL"],["qual","Квал"],["cpq","Цена квала"],["sales","Прод"],["cpo","CPO"],["revenue","Выручка"],["roas","ROAS"],["romi","ROMI"]];
+  const th=cols.map(([k,l])=>`<th data-k="${k}">${l}</th>`).join("");
+  const cr=creo.map(c=>`<tr><td title="${esc(c.creative)}">${esc((c.creative||"").slice(0,34))}</td><td>${esc(c.channel)}</td><td>${money(c.spend)}</td><td class="calc">${rus(c.impressions)}</td><td class="calc">${money2(c.cpm)}</td><td class="calc">${rus(c.clicks)}</td><td class="calc">${pct(c.ctr)}</td><td>${rus(c.leads)}</td><td class="calc">${money2(c.cpl)}</td><td>${rus(c.qual)}</td><td class="calc">${money2(c.cpq)}</td><td>${rus(c.sales)}</td><td class="calc">${money2(c.cpo)}</td><td>${money(c.revenue)}</td><td class="${c.roas>=1?"good":"bad"}">${c.roas?c.roas.toFixed(2).replace(".",",")+"x":"—"}</td><td class="${c.romi>=0?"good":"bad"}">${c.spend?(c.romi>=0?"+":"")+pct(c.romi):"—"}</td></tr>`).join("");
+  const crTable=`<div class="tw"><table><thead><tr>${th}</tr></thead><tbody>${cr}</tbody></table></div>`;
+
+  const mx=Math.max(t.impressions,1),fw=v=>Math.max(6,Math.round(v/mx*100));
+  const funnel=`<div class="funnel"><div class="fbar" style="width:${fw(t.impressions)}%;background:#0E4D64">${rus(t.impressions)} показы</div><div class="conv">→ клики ${pct(div(t.clicks,t.impressions))}</div><div class="fbar" style="width:${fw(t.clicks)}%;background:#2f6f86">${rus(t.clicks)} клики</div><div class="conv">→ лиды ${pct(div(t.leads,t.clicks))}</div><div class="fbar" style="width:${fw(t.leads)}%;background:#4f8ba0">${rus(t.leads)} лиды</div><div class="conv">→ квал ${pct(div(t.qual,t.leads))}</div><div class="fbar" style="width:${fw(t.qual)}%;background:#6b9db0">${rus(t.qual)} квал</div><div class="conv">→ продажи ${pct(div(t.sales,t.qual))}</div><div class="fbar" style="width:${fw(t.sales)}%;background:#79a7b8">${rus(t.sales)} продажи</div></div>`;
+
+  $("#app").innerHTML=kpis+`<h2>Воронка</h2>`+funnel+`<h2>Каналы</h2>`+chTable+`<h2>Креативы</h2>`+crTable;
+  document.querySelectorAll("th[data-k]").forEach(h=>h.onclick=()=>{const k=h.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=-1;}render();});
+}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+$("#load").onclick=load;
+setDefaults();load();
+setInterval(load,10*60000);
+</script>
+</body>
+</html>

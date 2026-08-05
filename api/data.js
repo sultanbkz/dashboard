@@ -8,7 +8,15 @@ export default async function handler(req, res) {
     const from = (req.query.from) || defaultFrom();
     const to = (req.query.to) || today();
 
-    const [fb, amo] = await Promise.all([fetchFacebook(from, to), fetchAmo()]);
+    const fb = await fetchFacebook(from, to);
+    // amoCRM необязателен: если он ещё не настроен, показываем только Facebook
+    let amo = [];
+    let amoError = null;
+    try {
+      amo = await fetchAmo();
+    } catch (e) {
+      amoError = String(e.message || e);
+    }
 
     // агрегируем сделки по ad_id
     const deals = {};
@@ -48,7 +56,7 @@ export default async function handler(req, res) {
     });
 
     res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate");
-    res.status(200).json({ from, to, rows, updated: new Date().toISOString() });
+    res.status(200).json({ from, to, rows, amoConnected: !amoError, amoError, updated: new Date().toISOString() });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
